@@ -1,26 +1,47 @@
 import argparse
 from train import main as train
+from test import main as test
 import os
+import pandas as pd
+from utils import print_resultscsv
 
 def main(args):
-    if args.mode == "train":
-        for seed in range(5):
-            args.seed = seed
-            args.snapshot_path = os.path.join(args.results_dir, f"model_{seed}.pth.tar")
-            if args.tensorboard is not None:
-                os.makedirs(args.tensorboard, exist_ok=True)
-                args.tensorboard_logdir = os.path.join(args.tensorboard, f"model_{seed}/")
-            else:
-                args.tensorboard_logdir = None
-            os.makedirs(args.results_dir, exist_ok=True)
+    testresults = []
+    valresults = []
 
+    for seed in range(args.num_seeds):
+        args.seed = seed
+        args.snapshot_path = os.path.join(args.results_dir, f"model_{seed}.pth.tar")
+        if args.tensorboard is not None:
+            os.makedirs(args.tensorboard, exist_ok=True)
+            args.tensorboard_logdir = os.path.join(args.tensorboard, f"model_{seed}/")
+        else:
+            args.tensorboard_logdir = None
+        os.makedirs(args.results_dir, exist_ok=True)
+
+        if args.mode == "train":
             train(args)
-    elif args.mode == "predict":
-        raise NotImplementedError("here all images should be predicted in a loop using the models trained before")
+
+        # TEST Trained Model
+        testresults_run, valresults_run = test(args)
+        testresults_run["seed"] = seed
+        valresults_run["seed"] = seed
+        testresults.append(testresults_run)
+        valresults.append(valresults_run)
+
+    pd.DataFrame(testresults).to_csv(os.path.join(args.results_dir, "testresults.csv"))
+    pd.DataFrame(valresults).to_csv(os.path.join(args.results_dir, "valresults.csv"))
+
+    print("Final Validation Results")
+    print_resultscsv(os.path.join(args.results_dir, "valresults.csv"))
+    print()
+    print()
+    print("Final Test Results")
+    print_resultscsv(os.path.join(args.results_dir, "testresults.csv"))
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('mode', type=str, choices=["train", "predict"])
+    parser.add_argument('mode', type=str, choices=["train", "test"])
     parser.add_argument('--results-dir', type=str, default="/tmp/floatingobjects")
     parser.add_argument('--tensorboard', type=str, default=None)
 
@@ -28,6 +49,7 @@ def parse_args():
     parser.add_argument('--data-path', type=str, default="/data")
     parser.add_argument('--batch-size', type=int, default=8)
     parser.add_argument('--workers', type=int, default=0)
+    parser.add_argument('--num-seeds', type=int, default=5, help="num of random seeds")
     parser.add_argument('--image-size', type=int, default=128)
     parser.add_argument('--device', type=str, choices=["cpu", "cuda"], default="cuda")
     parser.add_argument('--epochs', type=int, default=50)

@@ -5,15 +5,16 @@ import argparse
 
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import DataLoader
 from torch.optim import Adam
 from torch.utils.tensorboard import SummaryWriter
 from model import get_model
 from data import FloatingSeaObjectDataset
-from visualization import plot_batch
 from transforms import get_transform
 import json
-from sklearn.metrics import precision_recall_fscore_support, cohen_kappa_score, roc_auc_score
+from sklearn.metrics import roc_curve
+from utils import calculate_metrics, resume, snapshot, get_scores, predict_images
+from visualization import plot_roc
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -70,7 +71,7 @@ def main(args):
 
     # loading training datasets
     train_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=workers)
-    val_loader = DataLoader(valid_dataset, batch_size=batch_size, num_workers=workers, shuffle=True)
+    val_loader = DataLoader(valid_dataset, batch_size=batch_size, num_workers=workers, shuffle=False)
 
     # compute the number of labels in each class
     # weights = compute_class_occurences(train_loader) #function that computes the occurences of the classes
@@ -98,7 +99,9 @@ def main(args):
 
     bcecriterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight, reduction="none")
     def criterion(y_pred, target, mask=None):
-        """a wrapper around BCEWithLogitsLoss that ignores no-data
+        """
+        y_pred must be logits
+        a wrapper around BCEWithLogitsLoss that ignores no-data
         mask provides a boolean mask on valid data"""
         loss = bcecriterion(y_pred, target)
         #loss = dice_loss(y_pred, target) + bcecriterion(y_pred, target)
@@ -141,12 +144,26 @@ def main(args):
 
     for epoch in range(start_epoch, n_epochs + 1):
         trainloss = training_epoch(model, train_loader, optimizer, criterion, device)
-        valloss, metrics = validating_epoch(model, val_loader, criterion, device)
+        #valloss, metrics = validating_epoch(model, val_loader, criterion, device)
+
+        print("predicting validation dataset")
+        valscores, valtargets, valloss = get_scores(val_loader, model=model, device=args.device, n_batches=len(val_loader), criterion=criterion)
+
+        valtargets = valtargets.reshape(-1).astype(int)
+        valscores = valscores.reshape(-1)
+
+        fpr, tpr, thresholds = roc_curve(valtargets, valscores)
+        gmeans = np.sqrt(tpr * (1 - fpr))
+        ix = np.argmax(gmeans)
+        optimal_threshold = thresholds[ix]
+
+        metrics = calculate_metrics(valtargets, valscores, optimal_threshold)
 
         log = dict(
             epoch=epoch,
             trainloss=trainloss,
             valloss=valloss,
+            threshold=optimal_threshold
         )
         log.update(metrics)
 
@@ -155,9 +172,13 @@ def main(args):
         if writer is not None:
             writer.add_scalars("loss", {"train": trainloss, "val": valloss}, global_step=epoch)
             writer.add_scalars("metrics", metrics, global_step=epoch)
-            fig = predict_images(val_loader, model, device)
+            fig = predict_images(val_loader.dataset, model, device)
             writer.add_figure("predictions", fig, global_step=epoch)
 
+            fig = plot_roc(tpr, fpr, thresholds, metrics["auroc"])
+            writer.add_figure("receiver operating characteristic", fig, global_step=epoch)
+
+            """
             predictions, targets = get_scores(val_loader, model, device)
             targets = targets.reshape(-1)
             targets = targets > 0.5 # make to bool
@@ -173,6 +194,7 @@ def main(args):
             predictions = np.hstack([floating_predictions, not_floating_predictions])
             targets = np.hstack([np.ones_like(floating_predictions), np.zeros_like(not_floating_predictions)])
             writer.add_pr_curve("balanced", targets, predictions, global_step=epoch)
+            """
 
         # retrieve best loss by iterating through previous logged losses
         best_loss = min([l["valloss"] for l in logs])
@@ -207,7 +229,7 @@ def training_epoch(model, train_loader, optimizer, criterion, device):
             pbar.set_description(f'train loss {np.array(losses).mean():.4f}')
     return np.array(losses).mean()
 
-
+"""
 def validating_epoch(model, val_loader, criterion, device):
     with torch.no_grad():
         model.eval()
@@ -229,12 +251,12 @@ def validating_epoch(model, val_loader, criterion, device):
                 loss = criterion(y_pred.squeeze(1), target, mask=valid_data)
                 losses.append(loss.cpu().detach().numpy())
                 pbar.set_description(f'val loss {np.array(losses).mean():.4f}')
-                y_score = y_pred.exp()
+                y_score = torch.sigmoid(y_pred)
                 predictions = (y_score > 0.5).cpu().detach().numpy()
                 y_true = target.cpu().view(-1).numpy().astype(bool)
                 y_pred = predictions.reshape(-1)
-                p,r,f,s = precision_recall_fscore_support(y_true=y_true,
-                                                y_pred=y_pred, zero_division=0)
+                p, r, f, s = precision_recall_fscore_support(y_true=y_true,
+                                                y_pred=y_pred, zero_division=0, average="binary")
 
                 metrics["auroc"].append(roc_auc_score(target.cpu().view(-1).to(int),y_score.cpu().view(-1)))
                 metrics["kappa"].append(cohen_kappa_score(y_true, y_pred))
@@ -246,55 +268,7 @@ def validating_epoch(model, val_loader, criterion, device):
         metrics[k] = np.array(v).mean()
 
     return np.array(losses).mean(), metrics
-
-
-def predict_images(val_loader, model, device):
-    images, masks, id = next(iter(val_loader))
-    N = images.shape[0]
-
-    # plot at most 5 images even if the batch size is larger
-    if N > 5:
-        images = images[:5]
-        masks = masks[:5]
-
-    logits = model(images.to(device)).squeeze(1)
-    y_preds = torch.sigmoid(logits).detach().cpu().numpy()
-    return plot_batch(images, masks, y_preds)
-
-
-def get_scores(val_loader, model, device, n_batches=5):
-    y_preds = []
-    targets = []
-    with torch.no_grad():
-        for i in range(n_batches):
-            images, masks, id = next(iter(val_loader))
-            logits = model(images.to(device)).squeeze(1)
-            y_preds.append(torch.sigmoid(logits).detach().cpu().numpy())
-            targets.append(masks.detach().cpu().numpy())
-    return np.vstack(y_preds), np.vstack(targets)
-
-def snapshot(filename, model, optimizer, epoch, logs):
-    torch.save(dict(model_state_dict=model.state_dict(),
-                    optimizer_state_dict=optimizer.state_dict(),
-                    epoch=epoch,
-                    logs=logs),
-               filename)
-
-
-def resume(filename, model, optimizer):
-    snapshot_file = torch.load(filename)
-    model.load_state_dict(snapshot_file["model_state_dict"])
-    optimizer.load_state_dict(snapshot_file["optimizer_state_dict"])
-    return snapshot_file["epoch"], snapshot_file["logs"]
-
-
-def compute_class_occurences(train_loader):
-    sum_no_floating, sum_floating = 0, 0
-    for idx, (_, target, _) in enumerate(train_loader):
-        sum_no_floating += torch.sum(target == 0)
-        sum_floating += torch.sum(target == 1)
-    return sum_no_floating, sum_floating
-
+"""
 
 if __name__ == '__main__':
     args = parse_args()

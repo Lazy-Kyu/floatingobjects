@@ -30,9 +30,61 @@ def ndvi_transform(scene):
     RED = scene[bands.index("B4")]
     return (NIR - RED) / (NIR + RED + 1e-12)
 
-def plot_batch(images, masks, y_preds):
+def plot_roc(tpr, fpr, thresholds, auroc):
+
+    fig, axs = plt.subplots(1, 2, figsize=(6, 3))
+    ax = axs[0]
+    ax.plot(fpr, tpr)
+    ax.set_title(f"ROC curve (area ={auroc:.2f})")
+    ax.set_xlabel("False Positive Rate (TPR)")
+    ax.set_ylabel("True Positive Rate (FPR)")
+
+    ax = axs[1]
+
+    gmeans = np.sqrt(tpr * (1 - fpr))
+    ix = np.argmax(gmeans)
+    optimal_threshold = thresholds[ix]
+
+    ax.plot(thresholds, fpr)
+    ax.plot(thresholds, tpr)
+    ax.plot(thresholds, gmeans)
+
+    ax.legend(["FPR", "TPR", "np.sqrt(TPR * (1 - FPR))"])
+
+    ax.axvline(optimal_threshold)
+    ax.set_title(f"optimal threshold {optimal_threshold:.2f}")
+    ax.set_xlabel("geometric mean: sqrt(tpr * (1-fpr))")
+    ax.set_ylabel("thresholds")
+    ax.set_xlim(0,1)
+    plt.tight_layout()
+
+    return fig
+
+def plot_batch(images, masks, y_preds, ids):
     N = images.shape[0]
 
+    fig = plt.figure(constrained_layout=True, figsize=(5 * 3, N * 3))
+    fig.suptitle('Predictions')
+
+    subfigs = fig.subfigures(nrows=N, ncols=1)
+    for subfig, img, mask, y_pred, id in zip(subfigs, images, masks, y_preds, ids):
+        subfig.suptitle(f'ID {id}')
+        axs = subfig.subplots(nrows=1, ncols=5)
+        axs[0].imshow(s2_to_RGB(img), cmap="magma")
+        axs[0].set_title("RGB")
+        axs[1].imshow(ndvi_transform(img), cmap="viridis")
+        axs[1].set_title("NDVI")
+        axs[2].imshow(calculate_fdi(img), cmap="magma")
+        axs[2].set_title("FDI")
+        axs[3].imshow(mask)
+        axs[3].set_title("Mask")
+        axs[4].imshow(y_pred)
+        axs[4].set_title("Prediction")
+        [ax.axis("off") for ax in axs]
+
+    return fig
+
+    """
     height = 3
     width = 3
     fig, axs = plt.subplots(N, 5, figsize=(5 * width, N * height))
@@ -48,7 +100,8 @@ def plot_batch(images, masks, y_preds):
         axs_row[4].imshow(y_pred)
         axs_row[4].set_title("Prediction")
         [ax.axis("off") for ax in axs_row]
-    return fig
+    
+    """
 
 
 def plot_curves(nets, fpr, tpr, roc_auc, recall, prec):
@@ -67,8 +120,8 @@ def plot_curves(nets, fpr, tpr, roc_auc, recall, prec):
         j = 'U-Net' if i=='unet-cross-val-2fold' else 'MA-Net'
         ax1.plot(fpr[j], tpr[j], color=color, lw=lw, label='{0} (AUC = {1:0.2f})'.format(j, roc_auc[j]))
     ax1.plot([0, 1], [0, 1], 'k--', lw=1)
-    ax1.set(xlim=[-0.01, 1.01], ylim=[-0.01, 1.01], 
-            xlabel='False Positive Rate', ylabel='True Positive Rate', 
+    ax1.set(xlim=[-0.01, 1.01], ylim=[-0.01, 1.01],
+            xlabel='False Positive Rate', ylabel='True Positive Rate',
             title='Receiver Operating Characteristic')
 
     # Recall/Precision Curves
@@ -81,8 +134,8 @@ def plot_curves(nets, fpr, tpr, roc_auc, recall, prec):
     for i, color in zip(nets, colors):
         j = 'U-Net' if i=='unet-cross-val-2fold' else 'MA-Net'
         ax2.plot(recall[j], prec[j], color=color, lw=lw, label=f'{j}')
-    ax2.set(xlim=[-0.01, 1.01], ylim=[-0.01, 1.01], 
-            xlabel='Recall', ylabel='Precision', 
+    ax2.set(xlim=[-0.01, 1.01], ylim=[-0.01, 1.01],
+            xlabel='Recall', ylabel='Precision',
             title='Precision/Recall curve')
 
     handles, labels = ax1.get_legend_handles_labels()
