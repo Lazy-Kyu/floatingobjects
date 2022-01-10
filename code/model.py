@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from models.uresnet import get_segmentation_model, batch_norm_to_group_norm
+import torchvision
 
 def get_model(modelname, inchannels=12, pretrained=True):
     if modelname == "unet":
@@ -8,6 +10,15 @@ def get_model(modelname, inchannels=12, pretrained=True):
         model = UNet(n_channels=inchannels,
                      n_classes=1,
                      bilinear=False)
+    if modelname == "uresnet":
+        # initialize model (random weights)
+
+        backbone = torchvision.models.resnet18(pretrained=pretrained)
+        backbone.conv1 = nn.Conv2d(12, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
+
+        model = get_segmentation_model(backbone, feature_indices=(0, 4, 5, 6, 7),
+                                       feature_channels=(64, 64, 128, 256, 512))
+
     elif modelname in ["resnetunet", "resnetunetscse"]:
         import segmentation_models_pytorch as smp
         model = smp.Unet(
