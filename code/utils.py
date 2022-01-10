@@ -3,6 +3,7 @@ import torch
 from visualization import plot_batch
 from sklearn.metrics import precision_recall_fscore_support, cohen_kappa_score, roc_auc_score, roc_curve, jaccard_score, confusion_matrix
 import numpy as np
+import pandas as pd
 
 
 def calculate_metrics(targets, scores, optimal_threshold):
@@ -98,7 +99,7 @@ def get_scores(val_loader, model, device, n_batches=5, criterion=None):
     else:
         return np.vstack(y_preds), np.vstack(targets)
 
-def print_resultscsv(resultscsv):
+def print_resultscsv(resultscsv, file=None):
 
     formatters = {
         "auroc":'{:,.2f}'.format,
@@ -112,9 +113,9 @@ def print_resultscsv(resultscsv):
     df = pd.read_csv(resultscsv, index_col=0).set_index("seed")
     df = df[formatters.keys()]
 
-    print(f"results from {resultscsv}")
-    print()
-    print(df.to_string(formatters=formatters))
-    print()
-    print("averaged over seeds")
-    [print(f"{k:<15}: " + v(df.mean(0)[k]) + " +- " + v(df.std(0)[k])) for k, v in formatters.items()]
+    print(f"results from {resultscsv}", file=file)
+    print("", file=file)
+    print(df.to_string(formatters=formatters), file=file)
+    print("", file=file)
+    print("averaged over seeds", file=file)
+    [print(f"{k:<15}: " + v(df.mean(0)[k]) + " +- " + v(df.std(0)[k]), file=file) for k, v in formatters.items()]

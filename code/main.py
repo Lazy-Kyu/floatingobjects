@@ -29,15 +29,22 @@ def main(args):
         testresults.append(testresults_run)
         valresults.append(valresults_run)
 
+    # write as csv
     pd.DataFrame(testresults).to_csv(os.path.join(args.results_dir, "testresults.csv"))
     pd.DataFrame(valresults).to_csv(os.path.join(args.results_dir, "valresults.csv"))
 
-    print("Final Validation Results")
-    print_resultscsv(os.path.join(args.results_dir, "valresults.csv"))
-    print()
-    print()
-    print("Final Test Results")
-    print_resultscsv(os.path.join(args.results_dir, "testresults.csv"))
+    # write report to file
+    with open(os.path.join(args.results_dir, "report.txt")) as f:
+        print("Final Validation Results", file=f)
+        print_resultscsv(os.path.join(args.results_dir, "valresults.csv"), file=f)
+        print("", file=f)
+        print("", file=f)
+        print("Final Test Results", file=f)
+        print_resultscsv(os.path.join(args.results_dir, "testresults.csv"), file=f)
+
+    # print to console
+    with open(os.path.join(args.results_dir, "report.txt")) as f:
+        print(f.read())
 
 def parse_args():
     parser = argparse.ArgumentParser()

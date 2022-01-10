@@ -4,6 +4,9 @@ from skimage.exposure import equalize_hist
 from itertools import cycle
 from data import l2abands as bands
 
+import matplotlib
+matplotlib.use('Agg')
+
 def calculate_fdi(scene):
     # tbd
 
