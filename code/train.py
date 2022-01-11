@@ -42,6 +42,10 @@ def parse_args():
 
 
 def main(args):
+
+    torch.manual_seed(args.seed)
+    np.random.seed(args.seed)
+
     data_path = args.data_path
     snapshot_path = args.snapshot_path
 

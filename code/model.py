@@ -10,7 +10,19 @@ def get_model(modelname, inchannels=12, pretrained=True):
         model = UNet(n_channels=inchannels,
                      n_classes=1,
                      bilinear=False)
-    if modelname == "uresnet":
+    elif modelname == "fcnresnet":
+
+        backbone = torchvision.models.resnet50(pretrained=pretrained)
+        state_dict = backbone.state_dict()
+        state_dict.pop("fc.bias")
+        state_dict.pop("fc.weight")
+        model = torchvision.models.segmentation.fcn_resnet50()
+        model.backbone.load_state_dict(state_dict)
+
+        model.conv1 = nn.Conv2d(12, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=True)
+
+
+    elif modelname == "uresnet":
         # initialize model (random weights)
 
         backbone = torchvision.models.resnet18(pretrained=pretrained)

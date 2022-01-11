@@ -34,7 +34,7 @@ def main(args):
     pd.DataFrame(valresults).to_csv(os.path.join(args.results_dir, "valresults.csv"))
 
     # write report to file
-    with open(os.path.join(args.results_dir, "report.txt")) as f:
+    with open(os.path.join(args.results_dir, "report.txt"), "w") as f:
         print("Final Validation Results", file=f)
         print_resultscsv(os.path.join(args.results_dir, "valresults.csv"), file=f)
         print("", file=f)
