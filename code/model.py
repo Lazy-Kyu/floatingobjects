@@ -16,10 +16,17 @@ def get_model(modelname, inchannels=12, pretrained=True):
         state_dict = backbone.state_dict()
         state_dict.pop("fc.bias")
         state_dict.pop("fc.weight")
-        model = torchvision.models.segmentation.fcn_resnet50()
+        model = torchvision.models.segmentation.fcn_resnet50(num_classes=1)
         model.backbone.load_state_dict(state_dict)
 
-        model.conv1 = nn.Conv2d(12, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=True)
+        model.backbone.conv1 = nn.Conv2d(12, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=True)
+
+        # rename forward function
+        model.forward_dict = model.forward
+        # reassign forward without the dictionary output.
+        model.forward = lambda x: model.forward_dict(x)["out"]
+
+
 
 
     elif modelname == "uresnet":
