@@ -52,7 +52,7 @@ def plot_roc(tpr, fpr, thresholds, auroc):
     ax.plot(thresholds, tpr)
     ax.plot(thresholds, gmeans)
 
-    ax.legend(["FPR", "TPR", "np.sqrt(TPR * (1 - FPR))"])
+    ax.legend(["FPR", "TPR", "np.sqrt(TPR * (1 - FPR))"], loc='upper right')
 
     ax.axvline(optimal_threshold)
     ax.set_title(f"optimal threshold {optimal_threshold:.2f}")
