@@ -31,10 +31,20 @@ def parse_args():
     parser.add_argument('--device', type=str, choices=["cpu", "cuda"], default="cuda")
     parser.add_argument('--epochs', type=int, default=50)
     parser.add_argument('--no-pretrained', action="store_true")
-    parser.add_argument('--ignore_border_from_loss_kernelsize', type=int, default=0, help="kernel sizes >0 ignore pixels close to the positive class.")
+
     parser.add_argument('--learning-rate', type=float, default=1e-3)
     parser.add_argument('--tensorboard-logdir', type=str, default=None)
     parser.add_argument('--pos-weight', type=float, default=1, help="positional weight for the floating object class, large values counteract")
+
+    """
+    Add a negative outlier loss to the worst classified negative pixels
+    """
+    parser.add_argument('--neg_outlier_loss_border', type=int, default=19, help="kernel sizes >0 ignore pixels close to the positive class.")
+    parser.add_argument('--neg_outlier_loss_num_pixel', type=int, default=100,
+                        help="Extra penalize the worst classified pixels (largest loss) of each pixel. Controls a fraction of total number of pixels"
+                             "Only useful with ignore_border_from_loss_kernelsize > 0.")
+    parser.add_argument('--neg_outlier_loss_penalty_factor', type=float, default=3, help="kernel sizes >0 ignore pixels close to the positive class.")
+
     args = parser.parse_args()
     # args.image_size = (args.image_size,args.image_size)
 
@@ -110,19 +120,24 @@ def main(args):
         loss = bcecriterion(y_pred, target)
         #loss = dice_loss(y_pred, target) + bcecriterion(y_pred, target)
 
-        kernelsize = args.ignore_border_from_loss_kernelsize
+        kernelsize = args.neg_outlier_loss_border
         if kernelsize > 0:
             # calculate border pixels from positives and exclude them from loss
             dilated = torch.nn.functional.conv2d(target.unsqueeze(1),
                                                  weight=torch.ones(1, 1, kernelsize, kernelsize).to(target.device) / 9,
                                                  padding=kernelsize//2).squeeze(1)  > 0
-            border = dilated * ~target.to(bool)
-            mask = torch.logical_and(mask, ~border)
+            #border = dilated * ~target.to(bool)
+            #mask = torch.logical_and(mask, ~border)
 
-        if mask is not None:
-            return (loss * mask.double()).mean()
-        else:
-            return loss.mean()
+            if args.penalize_negative_outlier_fraction > 0:
+                neg_outlier_loss = torch.clone(loss)
+                neg_outlier_loss[dilated] = 0 # only consider the negative class
+                neg_outlier_loss = neg_outlier_loss.view(loss.shape[0], -1)
+                neg_outlier_loss = neg_outlier_loss.sort(dim=1)[0][:, -args.extra_loss_num_pixel:].mean() * args.extra_loss_penalty_factor
+            else:
+                neg_outlier_loss = 0
+
+        return loss.mean() + neg_outlier_loss
 
     inchannels = 12 if not args.add_fdi_ndvi else 14
     model = get_model(args.model, inchannels=inchannels, pretrained=not args.no_pretrained).to(device)
