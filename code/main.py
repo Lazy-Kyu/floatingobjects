@@ -9,6 +9,26 @@ def main(args):
     testresults = []
     valresults = []
 
+    """
+    results_dir = args.results_dir
+    metric = "auroc"
+
+    valresults = pd.read_csv(os.path.join(results_dir, "valresults.csv"))
+    testresults = pd.read_csv(os.path.join(results_dir, "testresults.csv"))
+
+    import json
+    seed = 0
+    regions = []
+    with open(os.path.join(results_dir, f"run_arguments_{seed}.json")) as f:
+        data = json.load(f)
+        regions.append(
+            {
+                "train": data["train_regions"],
+                "valid": data["valid_dataset"]
+            }
+        )
+    """
+
     for seed in range(args.num_seeds):
         args.seed = seed
         args.snapshot_path = os.path.join(args.results_dir, f"model_{seed}.pth.tar")
@@ -70,6 +90,16 @@ def parse_args():
                         help="kernel sizes >0 ignore pixels close to the positive class.")
     parser.add_argument('--no-pretrained', action="store_true")
     parser.add_argument('--pos-weight', type=float, default=1, help="positional weight for the floating object class, large values counteract")
+
+    """
+    Add a negative outlier loss to the worst classified negative pixels
+    """
+    parser.add_argument('--neg_outlier_loss_border', type=int, default=19, help="kernel sizes >0 ignore pixels close to the positive class.")
+    parser.add_argument('--neg_outlier_loss_num_pixel', type=int, default=100,
+                        help="Extra penalize the worst classified pixels (largest loss) of each pixel. Controls a fraction of total number of pixels"
+                             "Only useful with ignore_border_from_loss_kernelsize > 0.")
+    parser.add_argument('--neg_outlier_loss_penalty_factor', type=float, default=3, help="kernel sizes >0 ignore pixels close to the positive class.")
+
     args = parser.parse_args()
 
     return args

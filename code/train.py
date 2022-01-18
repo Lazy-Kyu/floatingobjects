@@ -129,13 +129,13 @@ def main(args):
             #border = dilated * ~target.to(bool)
             #mask = torch.logical_and(mask, ~border)
 
-            if args.penalize_negative_outlier_fraction > 0:
-                neg_outlier_loss = torch.clone(loss)
-                neg_outlier_loss[dilated] = 0 # only consider the negative class
-                neg_outlier_loss = neg_outlier_loss.view(loss.shape[0], -1)
-                neg_outlier_loss = neg_outlier_loss.sort(dim=1)[0][:, -args.extra_loss_num_pixel:].mean() * args.extra_loss_penalty_factor
-            else:
-                neg_outlier_loss = 0
+
+            neg_outlier_loss = torch.clone(loss)
+            neg_outlier_loss[dilated] = 0 # only consider the negative class
+            neg_outlier_loss = neg_outlier_loss.view(loss.shape[0], -1)
+            neg_outlier_loss = neg_outlier_loss.sort(dim=1)[0][:, -args.neg_outlier_loss_num_pixel:].mean() * args.neg_outlier_loss_penalty_factor
+        else:
+            neg_outlier_loss = 0
 
         return loss.mean() + neg_outlier_loss
 
