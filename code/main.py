@@ -93,8 +93,9 @@ def parse_args():
 
     """
     Add a negative outlier loss to the worst classified negative pixels
+    seems not to help... set --neg_outlier_loss_border to 0 from 19
     """
-    parser.add_argument('--neg_outlier_loss_border', type=int, default=19, help="kernel sizes >0 ignore pixels close to the positive class.")
+    parser.add_argument('--neg_outlier_loss_border', type=int, default=0, help="kernel sizes >0 ignore pixels close to the positive class.")
     parser.add_argument('--neg_outlier_loss_num_pixel', type=int, default=100,
                         help="Extra penalize the worst classified pixels (largest loss) of each pixel. Controls a fraction of total number of pixels"
                              "Only useful with ignore_border_from_loss_kernelsize > 0.")
