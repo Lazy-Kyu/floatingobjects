@@ -5,7 +5,24 @@ from models.uresnet import get_segmentation_model, batch_norm_to_group_norm
 import torchvision
 
 def get_model(modelname, inchannels=12, pretrained=True):
-    if modelname == "unet":
+
+    if modelname == "vit":
+        from models.vits import VisionTransformer, vit_base
+        #model = VisionTransformer(img_size = [224], patch_size = 16, in_chans = 3, num_classes = 0, embed_dim = 768, depth = 12,
+        #num_heads = 12, mlp_ratio = 4., qkv_bias = False, qk_scale = None, drop_rate = 0., attn_drop_rate = 0.,
+        #drop_path_rate = 0., norm_layer = nn.LayerNorm)
+        model = vit_base()
+
+        state_dict = torch.hub.load_state_dict_from_url(
+            url="https://dl.fbaipublicfiles.com/dino/dino_vitbase16_pretrain/dino_vitbase16_pretrain.pth",
+            map_location="cpu",
+        )
+        model.load_state_dict(state_dict, strict=False)
+
+        model.patch_embed.proj = nn.Conv2d(12, 768, kernel_size=(16, 16), stride=(16, 16))
+        #print()
+
+    elif modelname == "unet":
         # initialize model (random weights)
         model = UNet(n_channels=inchannels,
                      n_classes=1,

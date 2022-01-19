@@ -77,7 +77,7 @@ def parse_args():
     parser.add_argument('--batch-size', type=int, default=8)
     parser.add_argument('--workers', type=int, default=0)
     parser.add_argument('--num-seeds', type=int, default=5, help="num of random seeds")
-    parser.add_argument('--image-size', type=int, default=128)
+    parser.add_argument('--image-size', type=int, default=256)
     parser.add_argument('--device', type=str, choices=["cpu", "cuda"], default="cuda")
     parser.add_argument('--epochs', type=int, default=50)
     parser.add_argument('--learning-rate', type=float, default=1e-3)

@@ -27,7 +27,7 @@ def parse_args():
     parser.add_argument('--model', type=str, default="unet")
     parser.add_argument('--add-fdi-ndvi', action="store_true")
     parser.add_argument('--cache-to-numpy', action="store_true", help="performance optimization: caches images to npz files in a npy folder within data-path.")
-    parser.add_argument('--image-size', type=int, default=128)
+    parser.add_argument('--image-size', type=int, default=256)
     parser.add_argument('--device', type=str, choices=["cpu", "cuda"], default="cuda")
     parser.add_argument('--epochs', type=int, default=50)
     parser.add_argument('--no-pretrained', action="store_true")

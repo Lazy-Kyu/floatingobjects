@@ -131,7 +131,7 @@ class FloatingSeaObjectRegionDataset(torch.utils.data.Dataset):
         self.rasterize_geometries = pd.concat([rasterize_lines, rasterize_polygons])
 
         if cache_to_npy:
-            self.npyfolder = os.path.join(root, "npy", region)
+            self.npyfolder = os.path.join(root, f"npy_{output_size}", region)
             os.makedirs(self.npyfolder, exist_ok=True)
 
     def within_image(self, geometry):

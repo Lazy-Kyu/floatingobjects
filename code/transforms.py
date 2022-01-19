@@ -24,6 +24,7 @@ def get_transform(mode, intensity=0, add_fdi_ndvi=False):
                 image = np.vstack([image,ndvi,fdi])
 
             image *= 1e-4
+
             # return image, mask
             data_augmentation = get_data_augmentation(intensity=intensity)
             return data_augmentation(image, mask)
@@ -36,6 +37,9 @@ def get_transform(mode, intensity=0, add_fdi_ndvi=False):
                 image = np.vstack([image,ndvi,fdi])
 
             image *= 1e-4
+
+            image, mask = center_crop(image, mask, 224)
+
             image = torch.Tensor(image)
             mask = torch.Tensor(mask)
             return image, mask
@@ -91,7 +95,7 @@ def get_data_augmentation(intensity):
         if intensity >= 1:
 
             # random crop
-            cropsize = image.shape[2] // 2
+            cropsize = 224
             image, mask = random_crop(image, mask, cropsize=cropsize)
 
             std_noise = 1 * image.std()
@@ -138,4 +142,9 @@ def random_crop(image, mask, cropsize):
     image = image[:, x - dw:x + dw, y - dh:y + dh]
     mask = mask[:, x - dw:x + dw, y - dh:y + dh]
 
+    return image, mask
+
+def center_crop(image, mask, size):
+    image = image[:, size//2:-size//2, size//2:-size//2]
+    mask = mask[size//2:-size//2, size//2:-size//2]
     return image, mask
