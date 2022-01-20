@@ -167,6 +167,15 @@ class PatchEmbed(nn.Module):
         x = self.proj(x).flatten(2).transpose(1, 2)
         return x
 
+class ConvBNRelu(nn.Module):
+    def __init__(self, in_dim, out_dim, patch_size):
+        self.proj = nn.Sequential(
+            nn.Conv2d(1, 1, kernel_size=patch_size, stride=patch_size),
+            nn.ReLU()
+        )
+
+    def forward(self, x):
+        return self.proj(x)
 
 class VisionTransformer(nn.Module):
     """ Vision Transformer """
@@ -251,11 +260,16 @@ class VisionTransformer(nn.Module):
             x = blk(x)
         x = self.norm(x)
 
-        x_ = x[:, :-1] # cut away classification token
-        x_ = self.segmentation_head(x_)
-        x_ = x_.view(N, H, W)
+        cls_token_embedding = x[:, 0]
+        patch_tokens = x[:, 1:]
+        # cut away classification token
 
-        return x_ # x[:, 0]
+        patch_logits = torch.bmm(patch_tokens, cls_token_embedding.unsqueeze(-1))
+
+        patch_logits = patch_logits.view(N, W // self.patch_embed.patch_size, H // self.patch_embed.patch_size)
+        patch_logits = nn.functional.interpolate(patch_logits.unsqueeze(1), size=(W, H)).squeeze(1)
+
+        return patch_logits
 
     def get_last_selfattention(self, x):
         x = self.prepare_tokens(x)
