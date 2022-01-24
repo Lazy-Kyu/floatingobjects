@@ -20,6 +20,7 @@ from functools import partial
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 def _no_grad_trunc_normal_(tensor, mean, std, a, b):
     # Cut & paste from PyTorch official master until it's in a few official releases - RW
@@ -167,6 +168,47 @@ class PatchEmbed(nn.Module):
         x = self.proj(x).flatten(2).transpose(1, 2)
         return x
 
+class UnetPatchEmbed(nn.Module):
+    # ============== some parts of the U-Net model ===============#
+    """ Parts of the U-Net model """
+    def __init__(self, img_size=224, patch_size=16, in_chans=12, embed_dim=768):
+        super().__init__()
+        num_patches = (img_size // patch_size) * (img_size // patch_size)
+        self.img_size = img_size
+        self.patch_size = patch_size
+        self.num_patches = num_patches
+        self.in_chans = 12
+
+        self.N_prototypes = 8
+        self.prototypes = nn.Parameter(torch.randn(self.N_prototypes, self.in_chans))
+        self.outlinear = nn.Linear(self.in_chans * self.N_prototypes, embed_dim)
+
+        #self.unet = UNet(self.in_chans, embed_dim, embed_dim=embed_dim)
+
+        #self.proj = nn.Conv2d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size)
+
+    def forward(self, x):
+        B, C, H, W = x.shape
+        P = self.N_prototypes
+        #x_ = self.unet(x)
+        x_ = x.view(B,C,-1)
+        prototype_similarities = torch.bmm(x_.transpose(1, 2), self.prototypes.repeat(B, 1, 1).transpose(1, 2)).transpose(1,2)
+
+        proto = prototype_similarities.view(B, P, H, W)
+        patch_similarities = proto.unfold(2, self.patch_size, self.patch_size).unfold(3, self.patch_size, self.patch_size)
+        patch_similarities = patch_similarities.contiguous().view(B,P,self.num_patches, self.patch_size**2)
+        patch_similarities = patch_similarities / torch.sqrt(torch.tensor(self.in_chans)) # scaled dot product attention attention
+        self.patch_attention = patch_similarities.softmax(dim=3)
+
+        x_patches = x.unfold(2, self.patch_size, self.patch_size).unfold(3, self.patch_size, self.patch_size)
+        x_patches = x_patches.contiguous().view(B,C,self.num_patches, self.patch_size**2)
+
+        patch_attention_averaged = (self.patch_attention.unsqueeze(1) * x_patches.unsqueeze(2)).mean(-1)
+
+        patches = patch_attention_averaged.view(B, -1, self.num_patches).transpose(1,2)
+
+        return self.outlinear(patches)
+
 class ConvBNRelu(nn.Module):
     def __init__(self, in_dim, out_dim, patch_size):
         self.proj = nn.Sequential(
@@ -185,7 +227,7 @@ class VisionTransformer(nn.Module):
         super().__init__()
         self.num_features = self.embed_dim = embed_dim
 
-        self.patch_embed = PatchEmbed(
+        self.patch_embed = UnetPatchEmbed(
             img_size=img_size[0], patch_size=patch_size, in_chans=in_chans, embed_dim=embed_dim)
         num_patches = self.patch_embed.num_patches
 
@@ -203,7 +245,6 @@ class VisionTransformer(nn.Module):
 
         # Classifier head
         self.head = nn.Linear(embed_dim, num_classes) if num_classes > 0 else nn.Identity()
-        self.segmentation_head = nn.Linear(embed_dim, patch_size**2)
 
         trunc_normal_(self.pos_embed, std=.02)
         trunc_normal_(self.cls_token, std=.02)
@@ -242,6 +283,7 @@ class VisionTransformer(nn.Module):
 
     def prepare_tokens(self, x):
         B, nc, w, h = x.shape
+
         x = self.patch_embed(x)  # patch linear embedding
 
         # add the [CLS] token to the embed patch tokens
@@ -262,13 +304,52 @@ class VisionTransformer(nn.Module):
 
         cls_token_embedding = x[:, 0]
         patch_tokens = x[:, 1:]
+        # cut away classification token
 
         patch_logits = torch.bmm(patch_tokens, cls_token_embedding.unsqueeze(-1))
 
-        patch_logits = patch_logits.view(N, W // self.patch_embed.patch_size, H // self.patch_embed.patch_size)
-        patch_logits = nn.functional.interpolate(patch_logits.unsqueeze(1), size=(W, H)).squeeze(1)
+        #patch_logits = patch_logits.view(N, W // self.patch_embed.patch_size, H // self.patch_embed.patch_size)
+
+        attn = self.patch_embed.patch_attention
+        attn = attn.mean(1) # average over prototypes
+        ## Slow and inefficient
+
+        patch_logits_hr = patch_logits * attn
+
+        patch_logits = F.fold(patch_logits_hr.transpose(1,2), output_size=(H, W), kernel_size=self.patch_embed.patch_size, stride=self.patch_embed.patch_size).squeeze(1)
 
         return patch_logits
+
+        """
+        B, N, D = patch_tokens.shape
+        _, P, _, N_Px = attn.shape
+
+        # multiply patch vectors with local attention scores to add back spatial info
+        attn.view(B, P, N, 1, N_Px)
+        patch_tokens.view(B, 1, N, D, 1)
+        image = attn.view(B, P, N, 1, N_Px) * patch_tokens.view(B, 1, N, D, 1)
+
+        # reshape to B, P, D, N, N_px
+        image = image.permute(0,1,3,2,4)
+
+        # average features of the prototypes
+        image = image.mean(1)
+
+        i = image.transpose(2,3)
+
+        # bring to form B, C*N_px, N
+        i = i.contiguous().view(B, -1, N)
+
+        output = F.fold(i, output_size=(H, W), kernel_size=self.patch_embed.patch_size, stride=self.patch_embed.patch_size)
+
+        output = output.permute(0,2,3,1).contiguous().view(B,-1,D)
+
+        patch_logits = torch.bmm(output, cls_token_embedding.unsqueeze(2)).squeeze(2)
+
+        patch_logits = patch_logits.view(B, H, W)
+
+        return patch_logits
+        """
 
     def get_last_selfattention(self, x):
         x = self.prepare_tokens(x)

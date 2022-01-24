@@ -1,3 +1,4 @@
+import segmentation_models_pytorch
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -27,6 +28,24 @@ def get_model(modelname, inchannels=12, pretrained=True):
 
         model.patch_embed.proj = nn.Conv2d(12, 384, kernel_size=(8, 8), stride=(8, 8))
         #print()
+
+    elif modelname == "unetvit":
+        from models.unetvit import vit_small
+        model = vit_small(patch_size=8)
+        state_dict = torch.hub.load_state_dict_from_url(
+            url="https://dl.fbaipublicfiles.com/dino/dino_deitsmall8_pretrain/dino_deitsmall8_pretrain.pth",
+            map_location="cpu",
+        )
+        model.load_state_dict(state_dict, strict=False)
+
+    elif modelname == "prototypevit":
+        from models.prototypevit import vit_small
+        model = vit_small(patch_size=8)
+        state_dict = torch.hub.load_state_dict_from_url(
+            url="https://dl.fbaipublicfiles.com/dino/dino_deitsmall8_pretrain/dino_deitsmall8_pretrain.pth",
+            map_location="cpu",
+        )
+        model.load_state_dict(state_dict, strict=False)
 
     elif modelname == "unet":
         # initialize model (random weights)

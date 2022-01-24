@@ -13,7 +13,7 @@ def center_crop(image,mask):
     return image, mask
 """
 
-def get_transform(mode, intensity=0, add_fdi_ndvi=False):
+def get_transform(mode, intensity=0, add_fdi_ndvi=False, cropsize = 224):
     assert mode in ["train", "test"]
     if mode in ["train"]:
         def train_transform(image, mask):
@@ -26,7 +26,7 @@ def get_transform(mode, intensity=0, add_fdi_ndvi=False):
             image *= 1e-4
 
             # return image, mask
-            data_augmentation = get_data_augmentation(intensity=intensity)
+            data_augmentation = get_data_augmentation(intensity=intensity, cropsize=cropsize)
             return data_augmentation(image, mask)
         return train_transform
     else:
@@ -38,7 +38,7 @@ def get_transform(mode, intensity=0, add_fdi_ndvi=False):
 
             image *= 1e-4
 
-            image, mask = center_crop(image, mask, 224)
+            image, mask = center_crop(image, mask, cropsize)
 
             image = torch.Tensor(image)
             mask = torch.Tensor(mask)
@@ -68,7 +68,7 @@ def calculate_ndvi(scene):
     RED = scene[bands.index("B4")].astype(np.float)
     return (NIR - RED) / (NIR + RED + 1e-12)
 
-def get_data_augmentation(intensity):
+def get_data_augmentation(intensity, cropsize):
     """
     do data augmentation:
     model
@@ -94,8 +94,14 @@ def get_data_augmentation(intensity):
 
         if intensity >= 1:
 
-            # random crop
-            cropsize = 224
+            # a slight rescaling
+            scale_factor = np.random.normal(1, 1e-1)
+            min_scale_factor = (cropsize + 5) / image.shape[1] # clamp scale factor so that random crop to certain cropsize is still possible
+            scale_factor = np.max([scale_factor, min_scale_factor])
+
+            image = torch.nn.functional.interpolate(image.unsqueeze(0), scale_factor=scale_factor, mode="bilinear", align_corners=True,recompute_scale_factor=True).squeeze(0)
+            mask = torch.nn.functional.interpolate(mask.unsqueeze(0), scale_factor=scale_factor, mode="bilinear", align_corners=True,recompute_scale_factor=True).squeeze(0)
+
             image, mask = random_crop(image, mask, cropsize=cropsize)
 
             std_noise = 1 * image.std()
@@ -145,6 +151,11 @@ def random_crop(image, mask, cropsize):
     return image, mask
 
 def center_crop(image, mask, size):
-    image = image[:, size//2:-size//2, size//2:-size//2]
-    mask = mask[size//2:-size//2, size//2:-size//2]
+    D, H, W = image.shape
+
+    cx = W // 2
+    cy = H // 2
+
+    image = image[:, cx-size//2:cx+size//2, cy-size//2:cy+size//2]
+    mask = mask[cx-size//2:cx+size//2, cy-size//2:cy+size//2]
     return image, mask

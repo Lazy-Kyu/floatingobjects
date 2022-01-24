@@ -20,6 +20,7 @@ from functools import partial
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 def _no_grad_trunc_normal_(tensor, mean, std, a, b):
     # Cut & paste from PyTorch official master until it's in a few official releases - RW
@@ -167,6 +168,139 @@ class PatchEmbed(nn.Module):
         x = self.proj(x).flatten(2).transpose(1, 2)
         return x
 
+class UnetPatchEmbed(nn.Module):
+    # ============== some parts of the U-Net model ===============#
+    """ Parts of the U-Net model """
+    def __init__(self, img_size=224, patch_size=16, in_chans=3, embed_dim=768):
+        super().__init__()
+        num_patches = (img_size // patch_size) * (img_size // patch_size)
+        self.img_size = img_size
+        self.patch_size = patch_size
+        self.num_patches = num_patches
+
+        self.unet = UNet(12, embed_dim, embed_dim=embed_dim)
+
+        #self.proj = nn.Conv2d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size)
+
+    def forward(self, x):
+        #B, C, H, W = x.shape
+        #x_ = self.unet(x)
+        return self.unet.encode(x).flatten(2).transpose(1, 2)
+
+class DoubleConv(nn.Module):
+    """(convolution => [BN] => ReLU) * 2"""
+
+    def __init__(self, in_channels, out_channels, mid_channels=None):
+        super().__init__()
+        if not mid_channels:
+            mid_channels = out_channels
+        self.double_conv = nn.Sequential(
+            nn.Conv2d(in_channels, mid_channels, kernel_size=3, padding=1),
+            nn.BatchNorm2d(mid_channels),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(mid_channels, out_channels, kernel_size=3, padding=1),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True)
+        )
+
+    def forward(self, x):
+        return self.double_conv(x)
+
+class Down(nn.Module):
+    """Downscaling with maxpool then double conv"""
+
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        self.maxpool_conv = nn.Sequential(
+            nn.MaxPool2d(2),
+            DoubleConv(in_channels, out_channels)
+        )
+
+    def forward(self, x):
+        return self.maxpool_conv(x)
+
+class Up(nn.Module):
+    """Upscaling then double conv"""
+
+    def __init__(self, in_channels, out_channels, bilinear=True):
+        super().__init__()
+
+        # if bilinear, use the normal convolutions to reduce the number of channels
+        if bilinear:
+            self.up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
+            self.conv = DoubleConv(in_channels, out_channels, in_channels // 2)
+        else:
+            self.up = nn.ConvTranspose2d(in_channels, in_channels // 2, kernel_size=2, stride=2)
+            self.conv = DoubleConv(in_channels, out_channels)
+
+    def forward(self, x1, x2):
+        x1 = self.up(x1)
+        # input is CHW
+        diffY = x2.size()[2] - x1.size()[2]
+        diffX = x2.size()[3] - x1.size()[3]
+
+        x1 = F.pad(x1, [diffX // 2, diffX - diffX // 2,
+                        diffY // 2, diffY - diffY // 2])
+        # if you have padding issues, see
+        # https://github.com/HaiyongJiang/U-Net-Pytorch-Unstructured-Buggy/commit/0e854509c2cea854e247a9c615f175f76fbb2e3a
+        # https://github.com/xiaopeng-liao/Pytorch-UNet/commit/8ebac70e633bac59fc22bb5195e513d5832fb3bd
+        x = torch.cat([x2, x1], dim=1)
+        return self.conv(x)
+
+class OutConv(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super(OutConv, self).__init__()
+        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=1)
+
+    def forward(self, x):
+        return self.conv(x)
+
+    # =================== Assembling parts to form the network =================#
+    """ Full assembly of the parts to form the complete network """
+
+class UNet(nn.Module):
+    def __init__(self, n_channels, n_classes, embed_dim, bilinear=False):
+        super(UNet, self).__init__()
+        self.n_channels = n_channels
+        self.n_classes = n_classes
+        self.bilinear = bilinear
+
+
+        self.inc = DoubleConv(n_channels, embed_dim//8)
+        self.down1 = Down(embed_dim//8, embed_dim//4)
+        self.down2 = Down(embed_dim//4, embed_dim//2)
+        self.down3 = Down(embed_dim//2, embed_dim)
+        self.up1 = Up(embed_dim, embed_dim//2, bilinear)
+        self.up2 = Up(embed_dim//2, embed_dim//4, bilinear)
+        self.up3 = Up(embed_dim//4, embed_dim//8, bilinear)
+
+
+        #self.up4 = Up(embed_dim, embed_dim, bilinear=False)
+        #self.outc = OutConv(64, embed_dim)
+
+    def encode(self, x):
+
+        self.x1 = self.inc(x.float())
+        self.x2 = self.down1(self.x1)
+        self.x3 = self.down2(self.x2)
+        self.x4 = self.down3(self.x3)
+
+        return self.x4
+
+    def decode(self, emb):
+
+        #x5 = self.down4(x4)
+        x4 = emb
+        x = self.up1(x4, self.x3)
+        x = self.up2(x, self.x2)
+        x = self.up3(x, self.x1)
+
+        return x
+
+    def forward(self, x):
+        x = self.encode(x)
+        return self.decode(x)
+
 class ConvBNRelu(nn.Module):
     def __init__(self, in_dim, out_dim, patch_size):
         self.proj = nn.Sequential(
@@ -185,7 +319,7 @@ class VisionTransformer(nn.Module):
         super().__init__()
         self.num_features = self.embed_dim = embed_dim
 
-        self.patch_embed = PatchEmbed(
+        self.patch_embed = UnetPatchEmbed(
             img_size=img_size[0], patch_size=patch_size, in_chans=in_chans, embed_dim=embed_dim)
         num_patches = self.patch_embed.num_patches
 
@@ -203,7 +337,7 @@ class VisionTransformer(nn.Module):
 
         # Classifier head
         self.head = nn.Linear(embed_dim, num_classes) if num_classes > 0 else nn.Identity()
-        self.segmentation_head = nn.Linear(embed_dim, patch_size**2)
+        self.cls_token_linear = nn.Linear(embed_dim, embed_dim//8)
 
         trunc_normal_(self.pos_embed, std=.02)
         trunc_normal_(self.cls_token, std=.02)
@@ -261,12 +395,17 @@ class VisionTransformer(nn.Module):
         x = self.norm(x)
 
         cls_token_embedding = x[:, 0]
+        cls_token_embedding = self.cls_token_linear(cls_token_embedding)
         patch_tokens = x[:, 1:]
+        # cut away classification token
 
-        patch_logits = torch.bmm(patch_tokens, cls_token_embedding.unsqueeze(-1))
+        patch_tokens = patch_tokens.transpose(1, 2).view(N, patch_tokens.shape[2], W // self.patch_embed.patch_size, H // self.patch_embed.patch_size)
+        patch_tokens = self.patch_embed.unet.decode(patch_tokens)
 
-        patch_logits = patch_logits.view(N, W // self.patch_embed.patch_size, H // self.patch_embed.patch_size)
-        patch_logits = nn.functional.interpolate(patch_logits.unsqueeze(1), size=(W, H)).squeeze(1)
+        N, E, *_ = patch_tokens.shape
+        patch_logits = torch.bmm(patch_tokens.view(N, E , -1).transpose(1,2), cls_token_embedding.unsqueeze(-1))
+
+        patch_logits = patch_logits.view(N, H, W)
 
         return patch_logits
 

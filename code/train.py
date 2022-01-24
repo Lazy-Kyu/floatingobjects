@@ -145,7 +145,7 @@ def main(args):
 
 
     # initialize optimizer
-    optimizer = Adam(model.parameters(), lr=learning_rate)
+    optimizer = Adam(model.parameters(), lr=learning_rate, weight_decay=args.weight_decay)
 
     if snapshot_path is not None and os.path.exists(snapshot_path):
         start_epoch, logs = resume(snapshot_path, model, optimizer)
@@ -246,6 +246,7 @@ def training_epoch(model, train_loader, optimizer, criterion, device):
             loss.backward()
             optimizer.step()
             pbar.set_description(f'train loss {np.array(losses).mean():.4f}')
+
     return np.array(losses).mean()
 
 """
