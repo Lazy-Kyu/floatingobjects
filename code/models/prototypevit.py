@@ -179,7 +179,7 @@ class UnetPatchEmbed(nn.Module):
         self.num_patches = num_patches
         self.in_chans = 12
 
-        self.N_prototypes = 8
+        self.N_prototypes = 64
         self.prototypes = nn.Parameter(torch.randn(self.N_prototypes, self.in_chans))
         self.outlinear = nn.Linear(self.in_chans * self.N_prototypes, embed_dim)
 
